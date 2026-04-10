@@ -1,12 +1,12 @@
 MODEL:
   WEIGHTS: ''
 train:
-  batch_size_per_gpu: 128
+  batch_size_per_gpu: 32
   dataset_path: fmow:data_and_checkpoints/fmow_csvs/train_62classes.csv
   centering: sinkhorn_knopp
-  OFFICIAL_EPOCH_LENGTH: 1000
+  OFFICIAL_EPOCH_LENGTH: 500
 evaluation:
-  eval_period_iterations: 50000
+  eval_period_iterations: 100
 student:
   arch: vit_base
   patch_size: 14
@@ -23,7 +23,7 @@ optim:
   base_lr: 1.0e-04  # learning rate for a batch size of 1024
   warmup_epochs: 10
   layerwise_decay: 1.0
-  accum_iter: 8  # Add this for gradient accumulation
+  accum_iter: 32  # Add this for gradient accumulation
 crops:
   local_crops_size: 98
 

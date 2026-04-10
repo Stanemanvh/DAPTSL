@@ -12,7 +12,7 @@ import wilds
 import torch
 from torch.utils.data import Sampler
 
-from .datasets import ImageNet, CustomDatasetFromImages, SentinelIndividualImageDataset, Visda2017
+from .datasets import ImageNet, CustomDatasetFromImages, SentinelIndividualImageDataset, Visda2017, FMoWFromHuggingFace
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 
 
@@ -65,7 +65,8 @@ def _parse_dataset_str(dataset_str: str):
     elif name == "fmow":
         kwargs["csv_path"] = tokens[1]
 
-        class_ = CustomDatasetFromImages
+        class_ = FMoWFromHuggingFace
+
     elif name == "resisc45":
         kwargs["csv_path"] = tokens[1]
         kwargs["custom_targets"] = [i for i in range(45)]

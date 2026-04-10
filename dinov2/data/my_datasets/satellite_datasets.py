@@ -7,6 +7,8 @@ import os
 import pandas as pd
 import numpy as np
 import warnings
+from huggingface_hub import login
+from datasets import load_dataset
 
 from typing import Any, Optional, List
 
@@ -167,6 +169,52 @@ class SatelliteDataset(Dataset):
 
         # t.append(transforms.Normalize(mean, std))
         return transforms.Compose(t)
+
+class FMoWFromHuggingFace(SatelliteDataset):
+    mean = [0.4182007312774658, 0.4214799106121063, 0.3991275727748871]
+    std = [0.28774282336235046, 0.27541765570640564, 0.2764017581939697]
+
+    def __init__(self, csv_path, transform, target_transform=None, custom_targets=None, path_prefix=""):
+        """
+        Creates Dataset for regular RGB image classification (usually used for fMoW-RGB dataset).
+        :param csv_path: csv_path (string): path to csv file.
+        :param transform: pytorch transforms for transforms and tensor conversion.
+        """
+        super().__init__(in_c=3)
+        # Transforms
+        self.transforms = transform
+
+        # Load data from huggingface
+        path_prefix = os.environ.get("TMPDIR")
+        login("")
+        self.dataset = load_dataset("Staneman/DAPTSL_fMoW", cache_dir=path_prefix)["train"]
+
+        # Calculate len
+        self.data_len = len(self.dataset)
+
+        self.path_prefix = path_prefix
+
+        self.label_to_idx = {label: i for i, label in enumerate(CATEGORIES)}
+
+        # custom targets to replace CATEGORIES
+        self.custom_targets = custom_targets
+
+    def get_targets(self):
+        if self.custom_targets is None:
+            return np.array(self.dataset["label"])
+        return np.array(self.custom_targets)
+
+    def __getitem__(self, index):
+        example = self.dataset[index]
+
+        img = example["image"].convert("RGB")
+        img_tensor = self.transforms(img)
+
+        label = self.label_to_idx[example["label"]]
+        return img_tensor, label
+
+    def __len__(self):
+        return self.data_len
 
 
 class CustomDatasetFromImages(SatelliteDataset):

@@ -4,15 +4,7 @@ import os
 
 path_prefix = os.environ.get("TMPDIR")
 
+login("")
 dataset = load_dataset("Staneman/DAPTSL_fMoW", cache_dir=path_prefix)["train"]
 len(dataset)
 print(dataset[0])
-example = dataset[0]
-
-
-
-label = example["label"]
-print(label)
-print(type(example["label"]), example["label"])
-
-
