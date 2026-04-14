@@ -10,6 +10,12 @@ logs/
 node_modules/
 vendor/
 
+# outputs
+/data_and_checkpoints/
+**/output/
+**/outputs/
+outputs/
+
 # Build output
 dist/
 build/

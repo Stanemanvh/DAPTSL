@@ -209,17 +209,31 @@ class FMoWFromHuggingFaceBase(SatelliteDataset):
     std = [0.28774282336235046, 0.27541765570640564, 0.2764017581939697]
     split_candidates: List[str] = []
 
-    def __init__(self, csv_path, transform, dataset_repo="Staneman/DAPTSL_fMoW", cache_dir=None):
+    def __init__(
+        self,
+        csv_path,
+        transform,
+        dataset_repo="Staneman/DAPTSL_fMoW",
+        cache_dir=None,
+        train_max_samples=0,
+        seed=0,
+    ):
         super().__init__(in_c=3)
         self.transforms = transform
 
 
         path_prefix = os.environ.get("TMPDIR")
         login("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")
-        dataset_dict = load_dataset(dataset_repo, cache_dir=path_prefix)["train"]
+        dataset_dict = load_dataset(dataset_repo, cache_dir=path_prefix)
 
         split_name = self._pick_split(dataset_dict)
         self.dataset = dataset_dict[split_name]
+        self.dataset = self._maybe_subsample_train_split(
+            self.dataset,
+            split_name=split_name,
+            max_samples=train_max_samples,
+            seed=seed,
+        )
         self.data_len = len(self.dataset)
 
         self.label_to_idx = {label: i for i, label in enumerate(CATEGORIES)}
@@ -231,6 +245,59 @@ class FMoWFromHuggingFaceBase(SatelliteDataset):
         raise ValueError(
             f"Could not find any of {self.split_candidates} in available splits: {list(dataset_dict.keys())}"
         )
+
+    def _maybe_subsample_train_split(self, dataset_split, split_name, max_samples, seed):
+        # Only downsample training data; validation/test stay unchanged.
+        if split_name != "train":
+            return dataset_split
+
+        labels = dataset_split["label"]
+        total_samples = len(labels)
+
+        target_count = total_samples
+        if max_samples is not None and int(max_samples) > 0:
+            target_count = min(int(max_samples), total_samples)
+
+        if target_count >= total_samples:
+            return dataset_split
+
+        label_to_indices = {}
+        for idx, label in enumerate(labels):
+            label_to_indices.setdefault(label, []).append(idx)
+
+        rng = random.Random(seed)
+
+        class_items = []
+        total_float = 0.0
+        for label, indices in label_to_indices.items():
+            rng.shuffle(indices)
+            raw = (len(indices) / total_samples) * target_count
+            base = int(np.floor(raw))
+            class_items.append(
+                {
+                    "label": label,
+                    "indices": indices,
+                    "base": base,
+                    "frac": raw - base,
+                }
+            )
+            total_float += base
+
+        remaining = target_count - int(total_float)
+        class_items.sort(key=lambda x: x["frac"], reverse=True)
+        for item in class_items:
+            if remaining <= 0:
+                break
+            if item["base"] < len(item["indices"]):
+                item["base"] += 1
+                remaining -= 1
+
+        selected_indices = []
+        for item in class_items:
+            selected_indices.extend(item["indices"][: item["base"]])
+
+        rng.shuffle(selected_indices)
+        return dataset_split.select(selected_indices)
 
     def get_targets(self):
         return np.array(self.dataset["label"])
@@ -878,7 +945,12 @@ def build_fmow_dataset(is_train: bool, args) -> SatelliteDataset:
         mean = dataset_class.mean
         std = dataset_class.std
         transform = dataset_class.build_transform(is_train, args.input_size, mean, std)
-        dataset = dataset_class(csv_path, transform)
+        dataset = dataset_class(
+            csv_path,
+            transform,
+            train_max_samples=getattr(args, "hf_train_max_samples", 0),
+            seed=getattr(args, "seed", 0),
+        )
 
     elif args.dataset_type == "rgb" or args.dataset_type == "resisc45":
         mean = CustomDatasetFromImages.mean

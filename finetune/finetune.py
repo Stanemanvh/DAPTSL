@@ -219,6 +219,15 @@ def get_args_parser():
         help="Whether to use fmow rgb, Hugging Face fMoW, sentinel, or other dataset.",
     )
     parser.add_argument(
+        "--hf_train_max_samples",
+        default=0,
+        type=int,
+        help=(
+            "Absolute cap for Hugging Face training samples with class-balanced subsampling. "
+            "Use 0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--masked_bands",
         default=None,
         nargs="+",
