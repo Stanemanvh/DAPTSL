@@ -7,13 +7,6 @@
 #SBATCH --time=02:00:00
 #SBATCH --partition=gpu_a100
 
-# If not using SLURM, set num_gpus manually
-if [ -n "$SLURM_JOB_GPUS" ]; then
-  num_gpus=$(echo $SLURM_JOB_GPUS | tr ',' '\n' | wc -l)
-else
-  num_gpus=2
-fi
-
 # list out some useful information (optional)
 echo "SLURM_JOBID="$SLURM_JOBID
 echo "SLURM_JOB_NODELIST"=$SLURM_JOB_NODELIST

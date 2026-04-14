@@ -1,22 +1,12 @@
-#!/bin/bash                                                                                                
-#SBATCH --partition=TODO                     # Request partition
-#SBATCH --account=TODO
-#SBATCH -J explora_linprobe                  # Job name
-#SBATCH -o outputs/explora_linprobe%j.out    # output file (%j expands to jobID)
-#SBATCH -N 1                                 # Total number of nodes requested
-#SBATCH -n 8                                 # Total number of cores requested
-#SBATCH --get-user-env                       # retrieve the users login environment
-#SBATCH --mem=90000                          # server cpu memory requested (per node)
-#SBATCH -t 48:00:00                          # Time limit (hh:mm:ss)
-#SBATCH --gres=gpu:1                         # Type/number of GPUs needed
-#SBATCH --constraint=16G                     # gpu memory
+#!/bin/bash
+#SBATCH --job-name=finetune30ksamplesfmow
+#SBATCH --output=%x_%j.out    
+#SBATCH --ntasks=1
+#SBATCH --nodes=1
+#SBATCH --gpus=1
+#SBATCH --time=01:00:00
+#SBATCH --partition=gpu_a100
 
-# If not using SLURM, set num_gpus manually
-if [ -n "$SLURM_JOB_GPUS" ]; then
-  num_gpus=$(echo $SLURM_JOB_GPUS | tr ',' '\n' | wc -l)
-else
-  num_gpus=1
-fi
 
 # list out some useful information (optional)
 echo "SLURM_JOBID="$SLURM_JOBID
@@ -44,11 +34,12 @@ cfg_file="linprobe/configs/fmow_vitl14.yaml"
 pretrained_weights="${base_dir}/explora_dinov2_vit_large_fmow_rgb_encoder_only.pth"
 
 # ============ Output directory ============
-out_dir="${base_experiment_dir}/linprobe-explora_dino-rgb-blk23r64-bs256-epochs10"
+out_dir="${base_experiment_dir}/lp30konpretrained"
+hf_train_max_samples=0  # e.g., 30000; 0 disables cap
 
 # ============ Run ============
 export PYTHONPATH=.
-WANDB__SERVICE_WAIT=300 torchrun --nproc_per_node=$num_gpus --master_port=40001 -m linprobe.linear \
+WANDB__SERVICE_WAIT=300 torchrun --nproc_per_node=1 --master_port=40001 -m linprobe.linear \
     --wandb=explora_linprobe \
     --wandb_entity=TODO \
     --train-dataset="fmow:data_and_checkpoints/fmow_csvs/train_62classes.csv" \
@@ -57,6 +48,7 @@ WANDB__SERVICE_WAIT=300 torchrun --nproc_per_node=$num_gpus --master_port=40001 
     --output-dir="${out_dir}" \
     --pretrained-weights="${pretrained_weights}" \
     --batch-size=256 \
+    --hf-train-max-samples=${hf_train_max_samples} \
     --epochs=10 \
     --epoch-length=1500 \
     --save-checkpoint-frequency=1500 \

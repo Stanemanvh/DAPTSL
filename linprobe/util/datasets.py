@@ -8,6 +8,7 @@ import os
 import csv
 import warnings
 import logging
+import random
 import numpy as np
 import pandas as pd
 from enum import Enum
@@ -183,7 +184,16 @@ class FMoWFromHuggingFace(SatelliteDataset):
     mean = [0.4182007312774658, 0.4214799106121063, 0.3991275727748871]
     std = [0.28774282336235046, 0.27541765570640564, 0.2764017581939697]
 
-    def __init__(self, csv_path, transform, target_transform=None, custom_targets=None, path_prefix=""):
+    def __init__(
+        self,
+        csv_path,
+        transform,
+        target_transform=None,
+        custom_targets=None,
+        path_prefix="",
+        train_max_samples=0,
+        seed=0,
+    ):
         """
         Creates Dataset for regular RGB image classification (usually used for fMoW-RGB dataset).
         :param csv_path: csv_path (string): path to csv file.
@@ -201,6 +211,14 @@ class FMoWFromHuggingFace(SatelliteDataset):
         else:
             self.dataset = load_dataset("Staneman/DAPTSL_fMoW", cache_dir=path_prefix)["train"]
 
+        is_train_split = "test" not in csv_path
+        self.dataset = self._maybe_subsample_train_split(
+            self.dataset,
+            is_train_split=is_train_split,
+            max_samples=train_max_samples,
+            seed=seed,
+        )
+
         # Calculate len
         self.data_len = len(self.dataset)
 
@@ -210,6 +228,65 @@ class FMoWFromHuggingFace(SatelliteDataset):
 
         # custom targets to replace CATEGORIES
         self.custom_targets = custom_targets
+
+    def _maybe_subsample_train_split(self, dataset_split, is_train_split, max_samples, seed):
+        # Only downsample training data; validation/test stay unchanged.
+        if not is_train_split:
+            return dataset_split
+
+        labels = dataset_split["label"]
+        total_samples = len(labels)
+
+        target_count = total_samples
+        if max_samples is not None and int(max_samples) > 0:
+            target_count = min(int(max_samples), total_samples)
+
+        if target_count >= total_samples:
+            logger.info(f"HF linprobe cap disabled/equal: using full training set ({total_samples} samples)")
+            return dataset_split
+
+        label_to_indices = {}
+        for idx, label in enumerate(labels):
+            label_to_indices.setdefault(label, []).append(idx)
+
+        rng = random.Random(seed)
+        class_items = []
+        base_total = 0
+        for label, indices in label_to_indices.items():
+            rng.shuffle(indices)
+            raw = (len(indices) / total_samples) * target_count
+            base = int(np.floor(raw))
+            class_items.append(
+                {
+                    "label": label,
+                    "indices": indices,
+                    "base": base,
+                    "frac": raw - base,
+                }
+            )
+            base_total += base
+
+        remaining = target_count - base_total
+        class_items.sort(key=lambda x: x["frac"], reverse=True)
+        for item in class_items:
+            if remaining <= 0:
+                break
+            if item["base"] < len(item["indices"]):
+                item["base"] += 1
+                remaining -= 1
+
+        selected_indices = []
+        for item in class_items:
+            selected_indices.extend(item["indices"][: item["base"]])
+
+        rng.shuffle(selected_indices)
+        logger.info(
+            "HF linprobe cap applied: selected %d of %d samples (requested max_samples=%s)",
+            len(selected_indices),
+            total_samples,
+            str(max_samples),
+        )
+        return dataset_split.select(selected_indices)
 
     def get_targets(self):
         if self.custom_targets is None:

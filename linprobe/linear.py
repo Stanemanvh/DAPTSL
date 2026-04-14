@@ -123,6 +123,12 @@ def get_args_parser(
         help="Path to a file containing pretrained linear classifiers",
     )
     parser.add_argument(
+        "--hf-train-max-samples",
+        dest="hf_train_max_samples",
+        type=int,
+        help="Absolute cap for Hugging Face fmow training samples with class-balanced subsampling (0 disables).",
+    )
+    parser.add_argument(
         "--val-class-mapping-fpath",
         type=str,
         help="Path to a file containing a mapping to adjust classifier outputs",
@@ -158,6 +164,7 @@ def get_args_parser(
         classifier_fpath=None,
         val_class_mapping_fpath=None,
         test_class_mapping_fpaths=[None],
+        hf_train_max_samples=0,
     )
     return parser
 
@@ -522,6 +529,7 @@ def run_eval_linear(
     val_metric_type=MetricType.MEAN_ACCURACY,
     test_metric_types=None,
     wandb_project=None,
+    hf_train_max_samples=0,
 ):
     seed = 0
 
@@ -537,6 +545,7 @@ def run_eval_linear(
     train_dataset = make_dataset(
         dataset_str=train_dataset_str,
         transform=train_transform,
+        hf_train_max_samples=hf_train_max_samples,
     )
     training_num_classes = (
         len(torch.unique(torch.Tensor(train_dataset.get_targets().astype(int))))
@@ -669,6 +678,7 @@ def main(args):
         val_class_mapping_fpath=args.val_class_mapping_fpath,
         test_class_mapping_fpaths=args.test_class_mapping_fpaths,
         wandb_project=args.wandb,
+        hf_train_max_samples=args.hf_train_max_samples,
     )
     return 0
 

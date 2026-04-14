@@ -101,6 +101,7 @@ def make_dataset(
     dataset_str: str,
     transform: Optional[Callable] = None,
     target_transform: Optional[Callable] = None,
+    hf_train_max_samples: int = 0,
 ):
     """
     Creates a dataset with the specified parameters.
@@ -116,6 +117,8 @@ def make_dataset(
     logger.info(f'using dataset: "{dataset_str}"')
 
     class_, kwargs = _parse_dataset_str(dataset_str)
+    if class_ is FMoWFromHuggingFace:
+        kwargs["train_max_samples"] = hf_train_max_samples
     if (
         class_ is SentinelIndividualImageDataset
         and transform is not None
