@@ -204,6 +204,7 @@ def get_args_parser():
         default="rgb",
         choices=[
             "rgb",
+            "fmow_hf",
             "temporal",
             "sentinel",
             "euro_sat",
@@ -215,7 +216,7 @@ def get_args_parser():
             "poverty",
             "rxrx1",
         ],
-        help="Whether to use fmow rgb, sentinel, or other dataset.",
+        help="Whether to use fmow rgb, Hugging Face fMoW, sentinel, or other dataset.",
     )
     parser.add_argument(
         "--masked_bands",

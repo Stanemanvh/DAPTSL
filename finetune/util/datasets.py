@@ -5,6 +5,8 @@ import warnings
 import random
 from glob import glob
 import wilds
+from datasets import load_dataset
+from huggingface_hub import login
 
 from typing import Any, Optional, List
 
@@ -200,6 +202,56 @@ class CustomDatasetFromImages(SatelliteDataset):
 
     def __len__(self):
         return self.data_len
+
+
+class FMoWFromHuggingFaceBase(SatelliteDataset):
+    mean = [0.4182007312774658, 0.4214799106121063, 0.3991275727748871]
+    std = [0.28774282336235046, 0.27541765570640564, 0.2764017581939697]
+    split_candidates: List[str] = []
+
+    def __init__(self, csv_path, transform, dataset_repo="Staneman/DAPTSL_fMoW", cache_dir=None):
+        super().__init__(in_c=3)
+        self.transforms = transform
+
+
+        path_prefix = os.environ.get("TMPDIR")
+        login("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")
+        dataset_dict = load_dataset(dataset_repo, cache_dir=path_prefix)["train"]
+
+        split_name = self._pick_split(dataset_dict)
+        self.dataset = dataset_dict[split_name]
+        self.data_len = len(self.dataset)
+
+        self.label_to_idx = {label: i for i, label in enumerate(CATEGORIES)}
+
+    def _pick_split(self, dataset_dict):
+        for split_name in self.split_candidates:
+            if split_name in dataset_dict:
+                return split_name
+        raise ValueError(
+            f"Could not find any of {self.split_candidates} in available splits: {list(dataset_dict.keys())}"
+        )
+
+    def get_targets(self):
+        return np.array(self.dataset["label"])
+
+    def __getitem__(self, index):
+        example = self.dataset[index]
+        image = example["image"].convert("RGB")
+        image_tensor = self.transforms(image)
+        label = self.label_to_idx[example["label"]]
+        return image_tensor, label
+
+    def __len__(self):
+        return self.data_len
+
+
+class FMoWFromHuggingFaceTrain(FMoWFromHuggingFaceBase):
+    split_candidates = ["train"]
+
+
+class FMoWFromHuggingFaceValidation(FMoWFromHuggingFaceBase):
+    split_candidates = ["validation", "val", "test"]
 
 
 class FMoWTemporalStacked(SatelliteDataset):
@@ -821,7 +873,14 @@ def build_fmow_dataset(is_train: bool, args) -> SatelliteDataset:
     """
     csv_path = os.path.join(args.train_path if is_train else args.test_path)
 
-    if args.dataset_type == "rgb" or args.dataset_type == "resisc45":
+    if args.dataset_type == "fmow_hf":
+        dataset_class = FMoWFromHuggingFaceTrain if is_train else FMoWFromHuggingFaceValidation
+        mean = dataset_class.mean
+        std = dataset_class.std
+        transform = dataset_class.build_transform(is_train, args.input_size, mean, std)
+        dataset = dataset_class(csv_path, transform)
+
+    elif args.dataset_type == "rgb" or args.dataset_type == "resisc45":
         mean = CustomDatasetFromImages.mean
         std = CustomDatasetFromImages.std
         transform = CustomDatasetFromImages.build_transform(is_train, args.input_size, mean, std)

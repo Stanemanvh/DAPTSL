@@ -6,6 +6,7 @@ numpy==1.26.4
 scipy==1.13.0
 scikit-learn==1.4.2
 pandas==2.2.1
+datasets==2.19.1
 matplotlib==3.8.4
 pillow==10.2.0
 sympy==1.12
