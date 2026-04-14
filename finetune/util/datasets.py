@@ -223,7 +223,7 @@ class FMoWFromHuggingFaceBase(SatelliteDataset):
 
 
         path_prefix = os.environ.get("TMPDIR")
-        login("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")
+        login("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")
         dataset_dict = load_dataset(dataset_repo, cache_dir=path_prefix)
 
         split_name = self._pick_split(dataset_dict)

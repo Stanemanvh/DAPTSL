@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=DAPTSLexample
+#SBATCH --job-name=finetune30ksamplesfmow
 #SBATCH --output=%x_%j.out    
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --gpus=1
-#SBATCH --time=15:00:00
-#SBATCH --partition=gpu_mig
+#SBATCH --time=02:00:00
+#SBATCH --partition=gpu_a100
 
 # If not using SLURM, set num_gpus manually
 if [ -n "$SLURM_JOB_GPUS" ]; then
@@ -40,14 +40,14 @@ patch_size=14 ;
 # patch_size=16 ;  # for MAE pretrained checkpoints
 batch_size=64 ;
 accum_iter=4 ;
-epochs=12;
+epochs=30;
 blr=1e-3 ;
 hf_train_max_samples=30000 ;      # e.g., 50000; 0 disables absolute cap
 
 # Make sure DINO checkpoints have "dino" in the name
 pretrain_ckpt="${base_dir}/dinov2_vitb14_pretrain.pth"
 
-out_dir="${base_experiment_dir}/finetune/run1/${lora_type}_dino_pretrain-blk11r64_${dataset_type}-finetune_${lora_rank}_bs128"
+out_dir="${base_experiment_dir}/30ksamplesfmowvitb"
 
 torchrun --nproc_per_node=1 --master_port=40001 finetune/finetune.py \
    --output_dir="${out_dir}" \
@@ -59,6 +59,7 @@ torchrun --nproc_per_node=1 --master_port=40001 finetune/finetune.py \
    --lora_type="${lora_type}" --lora_rank="${lora_rank}" \
    --model_type="${model_type}" \
    --finetune="${pretrain_ckpt}" \
+   --hf_train_max_samples="${hf_train_max_samples}" \
    --unfreeze_blocks 11 \
    --unfreeze_norm --unfreeze_cls_token \
    --save_every=30 \
