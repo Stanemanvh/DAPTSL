@@ -116,7 +116,7 @@ def test_clients_and_server_forward(clients, server):
 
 
 def main(cfg, args):
-    n_clients = getattr(cfg.train, "n_clients", 12)
+    n_clients = getattr(cfg.train, "n_clients", 4)
     device = torch.device("cuda")
     clients = build_clients_from_cfg(
         cfg=cfg,
