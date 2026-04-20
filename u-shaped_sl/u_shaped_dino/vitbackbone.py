@@ -146,10 +146,8 @@ class DinoViTBackbone(nn.Module):
         self.init_weights()
 
     def init_weights(self):
-        trunc_normal_(self.pos_embed, std=0.02)
-        nn.init.normal_(self.cls_token, std=1e-6)
-        if self.register_tokens is not None:
-            nn.init.normal_(self.register_tokens, std=1e-6)
+        # This module consumes already-tokenized inputs, so it does not own
+        # cls/pos/register tokens like the client-side head.
         named_apply(init_weights_vit_timm, self)
 
 
@@ -195,7 +193,7 @@ def init_weights_vit_timm(module: nn.Module, name: str = ""):
 
 
 def vit_small(patch_size=16, num_register_tokens=0, **kwargs):
-    model = DinoVisionTransformer(
+    model = DinoViTBackbone(
         patch_size=patch_size,
         embed_dim=384,
         depth=12,
@@ -209,7 +207,7 @@ def vit_small(patch_size=16, num_register_tokens=0, **kwargs):
 
 
 def vit_base(patch_size=16, num_register_tokens=0, **kwargs):
-    model = DinoVisionTransformer(
+    model = DinoViTBackbone(
         patch_size=patch_size,
         embed_dim=768,
         depth=12,
@@ -223,7 +221,7 @@ def vit_base(patch_size=16, num_register_tokens=0, **kwargs):
 
 
 def vit_large(patch_size=16, num_register_tokens=0, **kwargs):
-    model = DinoVisionTransformer(
+    model = DinoViTBackbone(
         patch_size=patch_size,
         embed_dim=1024,
         depth=24,
@@ -240,7 +238,7 @@ def vit_giant2(patch_size=16, num_register_tokens=0, **kwargs):
     """
     Close to ViT-giant, with embed-dim 1536 and 24 heads => embed-dim per head 64
     """
-    model = DinoVisionTransformer(
+    model = DinoViTBackbone(
         patch_size=patch_size,
         embed_dim=1536,
         depth=40,

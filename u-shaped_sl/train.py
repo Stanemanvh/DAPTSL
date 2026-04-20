@@ -5,7 +5,9 @@ from torch import nn
 
 from args_parser import ArgsParser
 from client_uSL import ClientUShapedSL
+from server_uSL import ServerUShapedSL
 from u_shaped_dino.DINODataLoaderPartitioner import DINODataLoaderPartitioner
+from u_shaped_dino.dinobackbone import DinoBackbone
 from u_shaped_dino.dinohead import DinoHead
 from u_shaped_dino.vithead import DinoVitHead
 
@@ -76,6 +78,16 @@ def build_clients_from_cfg(cfg, n_clients: int = 12, start_iter: int = 0):
 
 
 def _format_output_summary(output):
+    if isinstance(output, dict):
+        summary = {}
+        for key, value in output.items():
+            if torch.is_tensor(value):
+                summary[key] = f"Tensor(shape={tuple(value.shape)}, dtype={value.dtype})"
+            elif isinstance(value, dict):
+                summary[key] = f"dict(keys={list(value.keys())})"
+            else:
+                summary[key] = type(value).__name__
+        return repr(summary)
     if isinstance(output, tuple):
         summary_parts = []
         for item in output:
@@ -95,20 +107,30 @@ def test_clients_forward(clients):
         print(f"client[{idx}] -> {_format_output_summary(output)}")
 
 
+def test_clients_and_server_forward(clients, server):
+    for idx, client in enumerate(clients):
+        client_output = client.forwardHead()
+        backbone_output = server.forwardBackbone(client_output)
+        print(f"client[{idx}] -> {_format_output_summary(client_output)}")
+        print(f"backbone[{idx}] -> {_format_output_summary(backbone_output)}")
+
+
 def main(cfg, args):
     n_clients = getattr(cfg.train, "n_clients", 12)
+    device = torch.device("cuda")
     clients = build_clients_from_cfg(
         cfg=cfg,
         n_clients=n_clients,
         start_iter=0,
     )
+    server = ServerUShapedSL(backbone=DinoBackbone(cfg).to(device))
 
     logger.info(
         "Constructed %d clients",
         len(clients),
     )
 
-    test_clients_forward(clients)
+    test_clients_and_server_forward(clients, server)
 
 
 if __name__ == "__main__":
