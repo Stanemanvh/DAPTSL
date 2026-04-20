@@ -80,3 +80,4 @@ lora:
   unfreeze_norm: true
   attn_key: false
   attn_proj: false
+  

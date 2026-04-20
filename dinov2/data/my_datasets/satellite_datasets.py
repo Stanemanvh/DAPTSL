@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import numpy as np
 import warnings
+from huggingface_hub import login
 from datasets import load_dataset
 
 from typing import Any, Optional, List
@@ -173,7 +174,7 @@ class FMoWFromHuggingFace(SatelliteDataset):
     mean = [0.4182007312774658, 0.4214799106121063, 0.3991275727748871]
     std = [0.28774282336235046, 0.27541765570640564, 0.2764017581939697]
 
-    def __init__(self, csv_path, transform, target_transform=None, custom_targets=None, path_prefix="", cache_dir=None):
+    def __init__(self, csv_path, transform, target_transform=None, custom_targets=None, path_prefix=""):
         """
         Creates Dataset for regular RGB image classification (usually used for fMoW-RGB dataset).
         :param csv_path: csv_path (string): path to csv file.
@@ -184,8 +185,9 @@ class FMoWFromHuggingFace(SatelliteDataset):
         self.transforms = transform
 
         # Load data from huggingface
-        cache_dir = cache_dir or os.environ.get("HF_HOME") or os.environ.get("TMPDIR")
-        self.dataset = load_dataset("Staneman/DAPTSL_fMoW", cache_dir=cache_dir)["train"]
+        path_prefix = os.environ.get("TMPDIR")
+        login("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")
+        self.dataset = load_dataset("Staneman/DAPTSL_fMoW", cache_dir=path_prefix)["train"]
 
         # Calculate len
         self.data_len = len(self.dataset)
