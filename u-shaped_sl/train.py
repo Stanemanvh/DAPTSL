@@ -46,7 +46,7 @@ def build_vithead_from_cfg(cfg):
 
 
 def build_clients_from_cfg(cfg, n_clients: int = 12, start_iter: int = 0):
-    inputs_dtype = torch.half
+    inputs_dtype = torch.float32
     partitioner = DINODataLoaderPartitioner(
         dataset_path=cfg.train.dataset_path,
         global_crops_size=cfg.crops.global_crops_size,
