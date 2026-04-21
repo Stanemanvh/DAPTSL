@@ -12,7 +12,7 @@ import torch.distributed as dist
 from dinov2.layers import DINOHead
 from dinov2.loss import DINOLoss, iBOTPatchLoss
 from u_shaped_dino.vitbackbone import DinoViTBackbone
-
+from dinov2.utils.train_lora_util import is_merged, activate_lora, deactivate_lora, delete_qkv
 
 logger = logging.getLogger("dinov2")
 
@@ -81,6 +81,83 @@ class DinoBackbone(nn.Module):
         self.ibot_out_dim = cfg.ibot.head_n_prototypes if self.ibot_separate_head else self.dino_out_dim
 
         self.student_backbone, self.teacher_backbone = build_model_from_cfg(cfg)
+
+        if cfg.student.pretrained_weights:
+            chkpt = torch.load(cfg.student.pretrained_weights)
+            logger.info(f"OPTIONS -- pretrained weights: loading from {cfg.student.pretrained_weights}")
+
+            # SatMAE style loading weights
+            load_chkpt = chkpt["model"] if "model" in chkpt else chkpt
+            student_backbone_sd = self.student_backbone.state_dict()
+            for k in [
+                "patch_embed.proj.weight",
+                "patch_embed.proj.bias",
+                "head.weight",
+                "head.bias",
+                "patch_embed.0.proj.weight",
+                "patch_embed.0.proj.bias",
+                "patch_embed.1.proj.weight",
+                "patch_embed.1.proj.bias",
+                "patch_embed.2.proj.weight",
+                "patch_embed.2.proj.bias",
+            ]:
+                if k not in student_backbone_sd and k not in load_chkpt:
+                    continue
+
+                if k not in student_backbone_sd or (
+                    k in load_chkpt and load_chkpt[k].shape != student_backbone_sd[k].shape
+                ):
+                    logger.info(f"Removing key {k} from pretrained checkpoint")
+                    del load_chkpt[k]
+
+            msg = self.student_backbone.load_state_dict(load_chkpt, strict=False)
+            print(msg)
+        
+        use_lora = hasattr(cfg, "lora")
+        if use_lora:
+            if cfg.lora.rank > 0:
+                self.activate_lora_for_model(
+                    self.student_backbone,
+                    cfg.lora.unfreeze_blocks,
+                    cfg.lora.layers,
+                    cfg.lora.rank,
+                    cfg.lora.attn_key,
+                    cfg.lora.attn_proj,
+                )
+                self.activate_lora_for_model(
+                    self.teacher_backbone,
+                    cfg.lora.unfreeze_blocks,
+                    cfg.lora.layers,
+                    cfg.lora.rank,
+                    cfg.lora.attn_key,
+                    cfg.lora.attn_proj,
+                )
+
+            for name, param in self.student["backbone"].named_parameters():
+                if not (
+                    "lora" in name
+                    or "register_token" in name
+                    or (cfg.lora.unfreeze_embed and ("patch_embed" in name or "decoder_pred" in name))
+                    or (getattr(cfg.lora, "unfreeze_channel_embed", False) and "channel_embed" in name)
+                    or (cfg.lora.unfreeze_norm and "norm" in name)
+                    or (cfg.lora.unfreeze_cls_token and "cls_token" in name)
+                    or (getattr(cfg.lora, "unfreeze_mask_token", False) and "mask_token" in name)
+                    or (
+                        cfg.lora.unfreeze_blocks is not None
+                        and any([f"blocks.{idx}." in name for idx in cfg.lora.unfreeze_blocks])
+                    )
+                ):
+                    param.requires_grad_(False)
+
+            # there is no backpropagation through the teacher, so no need for gradients (reset this after activating LoRA)
+            for p in self.teacher.backbone.parameters():
+                p.requires_grad = False
+
+            student_n_params = sum(p.numel() for p in self.student["backbone"].parameters() if p.requires_grad)
+            logger.info(f"NUMBER OF TRAINABLE PARAMS: {student_n_params}")
+
+            for k, v in self.student.items():
+                self.teacher[k].load_state_dict(self.student[k].state_dict())
 
         embed_dim = self.student_backbone.embed_dim
         self.student_dino_head = DINOHead(
@@ -343,6 +420,43 @@ class DinoBackbone(nn.Module):
 
     def forward(self, client_embeddings):
         return self.forward_features(client_embeddings)
+    
+    def activate_lora_for_model(model, unfreeze_blocks, lora_layers, lora_rank, lora_attn_key, lora_attn_proj):
+        if unfreeze_blocks is not None:
+            lora_blocks = [idx for idx in list(range(len(model.blocks))) if idx not in unfreeze_blocks]
+            for block_idx in lora_blocks:
+                activate_lora(
+                    model.blocks[block_idx],
+                    lora_layers,
+                    lora_rank,
+                    include_attn_key=lora_attn_key,
+                    include_attn_proj=lora_attn_proj,
+                )
+        else:
+            activate_lora(model, lora_layers, lora_rank, include_attn_key=lora_attn_key, include_attn_proj=lora_attn_proj)
+
+
+    def deactivate_lora_before_save(model, lora_cfg):
+        model.train(False)  # To merge lora weights
+        assert is_merged(model)
+        if lora_cfg.unfreeze_blocks is not None:
+            lora_blocks = [idx for idx in list(range(len(model.blocks))) if idx not in lora_cfg.unfreeze_blocks]
+            for block_idx in lora_blocks:
+                deactivate_lora(model.blocks[block_idx], activate_layers=lora_cfg.layers, delete_separate_proj=False)
+        else:
+            deactivate_lora(model, activate_layers=lora_cfg.layers, delete_separate_proj=False)  # So that qkv is created
+
+
+    def reactivate_lora_after_save(model, lora_cfg):
+        # Don't need qkv so delete
+        if lora_cfg.unfreeze_blocks is not None:
+            lora_blocks = [idx for idx in list(range(len(model.blocks))) if idx not in lora_cfg.unfreeze_blocks]
+            for block_idx in lora_blocks:
+                delete_qkv(model.blocks[block_idx], layers=lora_cfg.layers)
+        else:
+            delete_qkv(model, layers=lora_cfg.layers)
+        model.train(True)
+        assert not is_merged(model)
     
 
 
