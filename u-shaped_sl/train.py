@@ -1,4 +1,5 @@
 import logging
+import math
 
 import torch
 from torch import nn
@@ -8,8 +9,10 @@ from client_uSL import ClientUShapedSL
 from server_uSL import ServerUShapedSL
 from u_shaped_dino.DINODataLoaderPartitioner import DINODataLoaderPartitioner
 from u_shaped_dino.dinobackbone import DinoBackbone
+from u_shaped_dino.dino_loss import DinoLoss
 from u_shaped_dino.dinohead import DinoHead
 from u_shaped_dino.vithead import DinoVitHead
+from dinov2.utils.utils import CosineScheduler
 
 
 logger = logging.getLogger("u_shaped_sl")
@@ -123,10 +126,57 @@ def _aggregate_client_outputs(client_outputs):
     return global_unmasked, global_masked, local_unmasked, masks
 
 
-def do_train_forward_only(cfg, clients, server, start_iter: int = 0):
+def _build_optimizer(cfg, clients, server):
+    trainable_params = []
+    for client in clients:
+        trainable_params.extend(client.head.parameters())
+    trainable_params.extend(server.backbone.student_parameters())
+
+    return torch.optim.AdamW(
+        trainable_params,
+        lr=cfg.optim.lr,
+        betas=(cfg.optim.adamw_beta1, cfg.optim.adamw_beta2),
+        weight_decay=cfg.optim.weight_decay,
+    )
+
+
+def _build_momentum_schedule(cfg):
+    official_epoch_length = cfg.train.OFFICIAL_EPOCH_LENGTH
+    return CosineScheduler(
+        base_value=cfg.teacher.momentum_teacher,
+        final_value=cfg.teacher.final_momentum_teacher,
+        total_iters=cfg.optim.epochs * official_epoch_length,
+    )
+
+
+def _build_teacher_temp_schedule(cfg):
+    official_epoch_length = cfg.train.OFFICIAL_EPOCH_LENGTH
+    warmup_iters = cfg.teacher.warmup_teacher_temp_epochs * official_epoch_length
+    return CosineScheduler(
+        base_value=cfg.teacher.teacher_temp,
+        final_value=cfg.teacher.teacher_temp,
+        total_iters=max(warmup_iters, 1),
+        warmup_iters=warmup_iters,
+        start_warmup_value=cfg.teacher.warmup_teacher_temp,
+    )
+
+
+def _current_teacher_temp(teacher_temp_schedule, iteration):
+    if iteration < len(teacher_temp_schedule.schedule):
+        return teacher_temp_schedule[iteration]
+    return teacher_temp_schedule.schedule[-1]
+
+
+def do_train(cfg, clients, server, start_iter: int = 0):
     OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
     max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
     log_period = getattr(cfg.train, "log_period", 10)
+    accum_iter = getattr(cfg.optim, "accum_iter", 1)
+
+    optimizer = _build_optimizer(cfg, clients, server)
+    momentum_schedule = _build_momentum_schedule(cfg)
+    teacher_temp_schedule = _build_teacher_temp_schedule(cfg)
+    all_trainable_params = [p for group in optimizer.param_groups for p in group["params"]]
 
     for client in clients:
         client.head.train()
@@ -134,21 +184,51 @@ def do_train_forward_only(cfg, clients, server, start_iter: int = 0):
     server.backbone.train()
 
     iteration = start_iter
-    logger.info("Starting forward-only loop from iteration %d to %d", start_iter, max_iter)
+    logger.info("Starting training loop from iteration %d to %d", start_iter, max_iter)
 
-    while iteration <= max_iter:
-        with torch.no_grad():
-            client_outputs = [client.forwardHead() for client in clients]
-            aggregated_output = _aggregate_client_outputs(client_outputs)
-            backbone_output = server.forwardBackbone(aggregated_output)
+    while iteration < max_iter:
+        if iteration % accum_iter == 0:
+            optimizer.zero_grad(set_to_none=True)
+
+        teacher_temp = _current_teacher_temp(teacher_temp_schedule, iteration)
+
+        client_outputs = [client.forwardHead() for client in clients]
+        aggregated_output = _aggregate_client_outputs(client_outputs)
+        backbone_output, loss_dict = server.forwardBackboneAndComputeLoss(
+            aggregated_output,
+            teacher_temp=teacher_temp,
+        )
+
+        server.backwardLoss(loss_dict=loss_dict, accum_iter=accum_iter)
+
+        if (iteration + 1) % accum_iter == 0:
+            if getattr(cfg.optim, "clip_grad", 0):
+                torch.nn.utils.clip_grad_norm_(all_trainable_params, cfg.optim.clip_grad)
+
+            optimizer.step()
+
+            momentum = momentum_schedule[iteration]
+            server.backbone.update_teacher(momentum)
+
+        reduced_loss = {}
+        for k, v in loss_dict.items():
+            if torch.is_tensor(v):
+                reduced_loss[k] = float(v.detach().item())
+            else:
+                reduced_loss[k] = v
+
+        if math.isnan(reduced_loss["total_loss"]):
+            raise RuntimeError(f"NaN detected in total_loss at iteration {iteration}")
 
         if (iteration + 1) % log_period == 0 or iteration == start_iter:
-            logger.info("Forward-only iteration %d / %d", iteration, max_iter)
+            logger.info("Iteration %d / %d", iteration, max_iter)
             logger.info("Backbone output summary: %s", _format_output_summary(backbone_output))
+            logger.info("Loss summary: %s", reduced_loss)
+            logger.info("Teacher temperature: %.6f", teacher_temp)
 
         iteration = iteration + 1
 
-    logger.info("Forward-only loop complete at iteration %d", max_iter)
+    logger.info("Training loop complete at iteration %d", max_iter)
 
 
 def main(cfg, args):
@@ -159,14 +239,17 @@ def main(cfg, args):
         n_clients=n_clients,
         start_iter=0,
     )
-    server = ServerUShapedSL(backbone=DinoBackbone(cfg).to(device))
+    server = ServerUShapedSL(
+        backbone=DinoBackbone(cfg).to(device),
+        dino_loss=DinoLoss(cfg).to(device),
+    )
 
     logger.info(
         "Constructed %d clients",
         len(clients),
     )
 
-    do_train_forward_only(cfg, clients, server, start_iter=0)
+    do_train(cfg, clients, server, start_iter=0)
 
 
 if __name__ == "__main__":
