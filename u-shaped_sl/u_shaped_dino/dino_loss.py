@@ -41,6 +41,7 @@ class DinoLoss(nn.Module):
 
         self.dino_loss_weight = cfg.dino.loss_weight
         self.ibot_loss_weight = cfg.ibot.loss_weight
+        self.ibot_student_temp = getattr(cfg.ibot, "student_temp", 0.1)
         self.koleo_loss_weight = cfg.dino.koleo_loss_weight
         self.skip_koleo_inf = getattr(cfg.dino, "skip_koleo_inf", False)
         self.koleo_eps = getattr(cfg.dino, "koleo_eps", 1e-8)
@@ -80,7 +81,7 @@ class DinoLoss(nn.Module):
             return None
 
         ibot_loss = torch.sum(
-            teacher_ibot_targets * torch.log_softmax(student_patch_logits / self.cfg.ibot.student_temp, dim=-1),
+            teacher_ibot_targets * torch.log_softmax(student_patch_logits / self.ibot_student_temp, dim=-1),
             dim=-1,
         )
         masks_weight = (
