@@ -115,6 +115,42 @@ def test_clients_and_server_forward(clients, server):
         print(f"backbone[{idx}] -> {_format_output_summary(backbone_output)}")
 
 
+def _aggregate_client_outputs(client_outputs):
+    global_unmasked = torch.cat([out[0] for out in client_outputs], dim=0)
+    global_masked = torch.cat([out[1] for out in client_outputs], dim=0)
+    local_unmasked = torch.cat([out[2] for out in client_outputs], dim=0)
+    masks = torch.cat([out[3] for out in client_outputs], dim=0)
+    return global_unmasked, global_masked, local_unmasked, masks
+
+
+def do_train_forward_only(cfg, clients, server, start_iter: int = 0):
+    OFFICIAL_EPOCH_LENGTH = cfg.train.OFFICIAL_EPOCH_LENGTH
+    max_iter = cfg.optim.epochs * OFFICIAL_EPOCH_LENGTH
+    log_period = getattr(cfg.train, "log_period", 10)
+
+    for client in clients:
+        client.head.train()
+        client.tail.train()
+    server.backbone.train()
+
+    iteration = start_iter
+    logger.info("Starting forward-only loop from iteration %d to %d", start_iter, max_iter)
+
+    while iteration <= max_iter:
+        with torch.no_grad():
+            client_outputs = [client.forwardHead() for client in clients]
+            aggregated_output = _aggregate_client_outputs(client_outputs)
+            backbone_output = server.forwardBackbone(aggregated_output)
+
+        if (iteration + 1) % log_period == 0 or iteration == start_iter:
+            logger.info("Forward-only iteration %d / %d", iteration, max_iter)
+            logger.info("Backbone output summary: %s", _format_output_summary(backbone_output))
+
+        iteration = iteration + 1
+
+    logger.info("Forward-only loop complete at iteration %d", max_iter)
+
+
 def main(cfg, args):
     n_clients = getattr(cfg.train, "n_clients", 4)
     device = torch.device("cuda")
@@ -130,7 +166,7 @@ def main(cfg, args):
         len(clients),
     )
 
-    test_clients_and_server_forward(clients, server)
+    do_train_forward_only(cfg, clients, server, start_iter=0)
 
 
 if __name__ == "__main__":
