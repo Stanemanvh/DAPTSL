@@ -28,11 +28,16 @@ cfg_file="linprobe/configs/fmow_vitb14.yaml"
 # cfg_file=linprobe/configs/vitb14_pretrain.yaml
 
 # ============ Pretrained weights ============
-# Vanilla DINOv2 pretrained weights. If using this, set the cfg_file to be linprobe/configs/vitl14_pretrain.yaml
-# pretrained_weights="${base_dir}/dinov2_vitb14_pretrain.pth"
+# Base vanilla DINOv2 pretrained weights.
+base_pretrained_weights="${base_dir}/dinov2_vitb14_pretrain.pth"
 
-# ExPLoRA pretrained weights
-pretrained_weights="${base_dir}/teacher_checkpoint.pth"
+# ExPLoRA / teacher checkpoint used to overwrite matching layers.
+override_pretrained_weights="${base_dir}/teacher_checkpoint.pth"
+
+# Key per checkpoint in the same order as --pretrained-weights below.
+# Common values: model, teacher, none
+base_checkpoint_key="model"
+override_checkpoint_key="teacher"
 
 # ============ Output directory ============
 out_dir="${base_experiment_dir}/fulldatapretrained25epochseval1500"
@@ -45,7 +50,8 @@ WANDB__SERVICE_WAIT=300 torchrun --nproc_per_node=1 --master_port=40001 -m linpr
     --val-dataset="fmow:data_and_checkpoints/fmow_csvs/test_62classes.csv" \
     --config-file="${cfg_file}" \
     --output-dir="${out_dir}" \
-    --pretrained-weights="${pretrained_weights}" \
+    --pretrained-weights "${base_pretrained_weights}" "${override_pretrained_weights}" \
+    --pretrained-checkpoint-keys "${base_checkpoint_key}" "${override_checkpoint_key}" \
     --batch-size=256 \
     --hf-train-max-samples=${hf_train_max_samples} \
     --epochs=25 \

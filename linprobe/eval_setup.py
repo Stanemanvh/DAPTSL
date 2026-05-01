@@ -32,7 +32,18 @@ def get_args_parser(
     parser.add_argument(
         "--pretrained-weights",
         type=str,
-        help="Pretrained model weights",
+        nargs="+",
+        help="Pretrained model weights to load in order (later checkpoints override earlier ones)",
+    )
+    parser.add_argument(
+        "--pretrained-checkpoint-keys",
+        type=str,
+        nargs="+",
+        default=None,
+        help=(
+            "Optional checkpoint keys for --pretrained-weights in the same order "
+            "(e.g., model teacher). Use none to load from root state_dict for that checkpoint."
+        ),
     )
     parser.add_argument(
         "--output-dir",
@@ -59,13 +70,31 @@ def get_autocast_dtype(config):
         return torch.float
 
 
-def build_model_for_eval(config, pretrained_weights):
+def build_model_for_eval(config, pretrained_weights, pretrained_checkpoint_keys=None):
     model, _ = build_model_from_cfg(config, only_teacher=True)
-    linprobe_utils.load_pretrained_weights(
-        model,
-        pretrained_weights,
-        config.student.checkpoint_key if hasattr(config.student, "checkpoint_key") else "teacher",
-    )
+    default_checkpoint_key = config.student.checkpoint_key if hasattr(config.student, "checkpoint_key") else "teacher"
+
+    # Backward compatibility: accept either a single path or multiple paths.
+    if isinstance(pretrained_weights, str):
+        pretrained_weights = [pretrained_weights]
+
+    if pretrained_checkpoint_keys is None:
+        checkpoint_keys = [default_checkpoint_key] * len(pretrained_weights)
+    else:
+        if isinstance(pretrained_checkpoint_keys, str):
+            pretrained_checkpoint_keys = [pretrained_checkpoint_keys]
+        if len(pretrained_checkpoint_keys) != len(pretrained_weights):
+            raise ValueError(
+                "--pretrained-checkpoint-keys must have the same number of entries as --pretrained-weights"
+            )
+        checkpoint_keys = [None if str(k).lower() in {"none", "null", ""} else k for k in pretrained_checkpoint_keys]
+
+    for weights_path, checkpoint_key in zip(pretrained_weights, checkpoint_keys):
+        linprobe_utils.load_pretrained_weights(
+            model,
+            weights_path,
+            checkpoint_key,
+        )
     model.eval()
     model.cuda()
     return model
@@ -74,6 +103,6 @@ def build_model_for_eval(config, pretrained_weights):
 def setup_and_build_model(args) -> Tuple[Any, Any, torch.dtype]:
     cudnn.benchmark = True
     config = setup(args)
-    model = build_model_for_eval(config, args.pretrained_weights)
+    model = build_model_for_eval(config, args.pretrained_weights, args.pretrained_checkpoint_keys)
     autocast_dtype = get_autocast_dtype(config)
     return model, config, autocast_dtype
